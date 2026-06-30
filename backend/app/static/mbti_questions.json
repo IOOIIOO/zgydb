@@ -1,0 +1,312 @@
+{
+  "description": "MBTI 四维度测评题目（固化题目，不修改）",
+  "total": 40,
+  "dimensions": {
+    "EI": {
+      "label": "外向(E) vs 内向(I)",
+      "option_a_label": "E 方向",
+      "option_b_label": "I 方向",
+      "count": 10
+    },
+    "SN": {
+      "label": "感觉(S) vs 直觉(N)",
+      "option_a_label": "S 方向",
+      "option_b_label": "N 方向",
+      "count": 10
+    },
+    "TF": {
+      "label": "思考(T) vs 情感(F)",
+      "option_a_label": "T 方向",
+      "option_b_label": "F 方向",
+      "count": 10
+    },
+    "JP": {
+      "label": "判断(J) vs 感知(P)",
+      "option_a_label": "J 方向",
+      "option_b_label": "P 方向",
+      "count": 10
+    }
+  },
+  "questions": [
+    {
+      "id": 1,
+      "dimension": "EI",
+      "text": "在社交聚会中，你通常：",
+      "option_a": "与很多人交流，感到精力充沛",
+      "option_b": "与少数熟悉的人深入交谈"
+    },
+    {
+      "id": 2,
+      "dimension": "EI",
+      "text": "独处一段时间后，你通常会：",
+      "option_a": "感到无聊，想找人交流",
+      "option_b": "感到放松，享受独处时光"
+    },
+    {
+      "id": 3,
+      "dimension": "EI",
+      "text": "在团队讨论中，你更倾向于：",
+      "option_a": "边说边想，通过讨论理清思路",
+      "option_b": "先想清楚再发言"
+    },
+    {
+      "id": 4,
+      "dimension": "EI",
+      "text": "认识新朋友对你来说是：",
+      "option_a": "令人兴奋和有活力的事",
+      "option_b": "消耗精力但有时必要的事"
+    },
+    {
+      "id": 5,
+      "dimension": "EI",
+      "text": "你的社交圈：",
+      "option_a": "广泛，认识各行各业的人",
+      "option_b": "小而精，只有几个亲密朋友"
+    },
+    {
+      "id": 6,
+      "dimension": "EI",
+      "text": "在工作会议中，你更喜欢：",
+      "option_a": "头脑风暴、自由讨论",
+      "option_b": "提前拿到议程，有准备地参与"
+    },
+    {
+      "id": 7,
+      "dimension": "EI",
+      "text": "周末你更愿意：",
+      "option_a": "和朋友出去玩或参加活动",
+      "option_b": "在家看书、看电影或做自己的事"
+    },
+    {
+      "id": 8,
+      "dimension": "EI",
+      "text": "接电话时你通常：",
+      "option_a": "立即接听，快速回应",
+      "option_b": "先想一下要说什么再接"
+    },
+    {
+      "id": 9,
+      "dimension": "EI",
+      "text": "在学习新知识时，你更喜欢：",
+      "option_a": "小组讨论和交流",
+      "option_b": "独立阅读和研究"
+    },
+    {
+      "id": 10,
+      "dimension": "EI",
+      "text": "你的精力来源是：",
+      "option_a": "和他人互动让你充满能量",
+      "option_b": "独处反思让你恢复精力"
+    },
+    {
+      "id": 11,
+      "dimension": "SN",
+      "text": "学习新概念时，你更喜欢：",
+      "option_a": "具体的实例和应用",
+      "option_b": "抽象的理论和框架"
+    },
+    {
+      "id": 12,
+      "dimension": "SN",
+      "text": "阅读一本书时，你更关注：",
+      "option_a": "情节和细节",
+      "option_b": "主题和隐喻"
+    },
+    {
+      "id": 13,
+      "dimension": "SN",
+      "text": "解决问题时，你更依赖：",
+      "option_a": "过往的经验和已验证的方法",
+      "option_b": "直觉和新的可能性"
+    },
+    {
+      "id": 14,
+      "dimension": "SN",
+      "text": "你更信任：",
+      "option_a": "亲身经历和事实数据",
+      "option_b": "第六感和潜在趋势"
+    },
+    {
+      "id": 15,
+      "dimension": "SN",
+      "text": "做一个项目时，你更关注：",
+      "option_a": "具体的步骤和可操作的细节",
+      "option_b": "整体的愿景和未来的可能性"
+    },
+    {
+      "id": 16,
+      "dimension": "SN",
+      "text": "描述一个事物时，你更倾向于：",
+      "option_a": "从具体特征和事实出发",
+      "option_b": "从整体印象和关联出发"
+    },
+    {
+      "id": 17,
+      "dimension": "SN",
+      "text": "你更欣赏哪种类型的老师：",
+      "option_a": "循序渐进、重点明确的",
+      "option_b": "富有启发性、引经据典的"
+    },
+    {
+      "id": 18,
+      "dimension": "SN",
+      "text": "看一部电影后，你更多记住：",
+      "option_a": "具体的场景和台词",
+      "option_b": "整体的感受和主题"
+    },
+    {
+      "id": 19,
+      "dimension": "SN",
+      "text": "在工作中你更注重：",
+      "option_a": "实际效果和可衡量的结果",
+      "option_b": "创新思路和长远意义"
+    },
+    {
+      "id": 20,
+      "dimension": "SN",
+      "text": "学习一项技能时，你更喜欢：",
+      "option_a": "按照教程一步步练习",
+      "option_b": "先了解全貌再自由探索"
+    },
+    {
+      "id": 21,
+      "dimension": "TF",
+      "text": "做重要决定时，你更多依靠：",
+      "option_a": "逻辑分析和客观利弊",
+      "option_b": "价值观和对他人的影响"
+    },
+    {
+      "id": 22,
+      "dimension": "TF",
+      "text": "面对朋友遇到的困难，你首先：",
+      "option_a": "分析问题并提供解决方案",
+      "option_b": "给予情感支持和安慰"
+    },
+    {
+      "id": 23,
+      "dimension": "TF",
+      "text": "在争论中，你更看重：",
+      "option_a": "事实和逻辑的一致性",
+      "option_b": "维护双方的关系和情感"
+    },
+    {
+      "id": 24,
+      "dimension": "TF",
+      "text": "别人形容你是一个：",
+      "option_a": "理性、客观、公正的人",
+      "option_b": "温暖、善解人意的人"
+    },
+    {
+      "id": 25,
+      "dimension": "TF",
+      "text": "你更欣赏哪种领导：",
+      "option_a": "公平公正、以结果为导向的",
+      "option_b": "关心下属、以团队和谐为重的"
+    },
+    {
+      "id": 26,
+      "dimension": "TF",
+      "text": "给同事提反馈时，你更倾向于：",
+      "option_a": "直接指出问题所在",
+      "option_b": "先肯定再委婉地提出建议"
+    },
+    {
+      "id": 27,
+      "dimension": "TF",
+      "text": "面对批评时，你的第一反应是：",
+      "option_a": "分析批评是否合理、有依据",
+      "option_b": "在意对方的语气和态度"
+    },
+    {
+      "id": 28,
+      "dimension": "TF",
+      "text": "你更尊重的品质是：",
+      "option_a": "逻辑严谨、一视同仁",
+      "option_b": "善良体贴、通情达理"
+    },
+    {
+      "id": 29,
+      "dimension": "TF",
+      "text": "工作中发生了冲突，你会：",
+      "option_a": "厘清事实，找到最公平的解决方案",
+      "option_b": "优先考虑各方的感受，寻求和解"
+    },
+    {
+      "id": 30,
+      "dimension": "TF",
+      "text": "选择一个工作岗位时，你更看重：",
+      "option_a": "薪资待遇和职业发展空间",
+      "option_b": "工作氛围和团队文化"
+    },
+    {
+      "id": 31,
+      "dimension": "JP",
+      "text": "面对截止日期时，你通常：",
+      "option_a": "提前计划，按部就班完成",
+      "option_b": "最后冲刺，在压力下更高效"
+    },
+    {
+      "id": 32,
+      "dimension": "JP",
+      "text": "你的工作桌面通常是：",
+      "option_a": "整洁有序，东西各有其位",
+      "option_b": "随意摆放，但我知道东西在哪"
+    },
+    {
+      "id": 33,
+      "dimension": "JP",
+      "text": "开始一个新任务时，你更倾向于：",
+      "option_a": "制定详细计划再执行",
+      "option_b": "直接动手，边做边调整"
+    },
+    {
+      "id": 34,
+      "dimension": "JP",
+      "text": "你喜欢的生活节奏是：",
+      "option_a": "有规律、有计划、可预期的",
+      "option_b": "灵活多变、即兴而为的"
+    },
+    {
+      "id": 35,
+      "dimension": "JP",
+      "text": "做旅行计划时，你更喜欢：",
+      "option_a": "提前安排好行程、住宿、交通",
+      "option_b": "大致定个方向，到了再说"
+    },
+    {
+      "id": 36,
+      "dimension": "JP",
+      "text": "对于规则和流程，你的态度是：",
+      "option_a": "遵守规则让人安心，有利于效率",
+      "option_b": "规则限制太多会让人窒息"
+    },
+    {
+      "id": 37,
+      "dimension": "JP",
+      "text": "你的购物习惯是：",
+      "option_a": "列好清单，买完就走",
+      "option_b": "逛到哪里买到哪里"
+    },
+    {
+      "id": 38,
+      "dimension": "JP",
+      "text": "对于未来的安排，你更倾向于：",
+      "option_a": "提前锁定计划，不喜欢临时变动",
+      "option_b": "保持开放，随时可以根据情况调整"
+    },
+    {
+      "id": 39,
+      "dimension": "JP",
+      "text": "工作中你更享受：",
+      "option_a": "完成任务并打勾的那一刻",
+      "option_b": "探索新可能和不断迭代的过程"
+    },
+    {
+      "id": 40,
+      "dimension": "JP",
+      "text": "你觉得自己更像是：",
+      "option_a": "喜欢做决定、了结事情的人",
+      "option_b": "喜欢保持选择、探索可能性的人"
+    }
+  ]
+}
