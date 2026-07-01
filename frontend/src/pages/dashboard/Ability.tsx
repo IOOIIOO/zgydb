@@ -5,11 +5,14 @@ import { CheckCircle2, RotateCcw, ArrowRight, ChevronDown, ChevronUp, Sparkles }
 import { useNavigate } from "react-router-dom";
 import { ChatMessages, type ChatMessage } from "@/components/ui/chat-messages";
 import { ChatInput } from "@/components/ui/chat-input";
-import { sendChatMessage, uploadResume, getAbilityPortrait } from "@/api/ability";
+import { sendChatMessage, uploadResume, getAbilityPortrait, submitDescription } from "@/api/ability";
 import type { AbilityPortrait } from "@/types";
+import { useAuth } from "@/hooks/useAuth";
+import { clearUserDetails } from "@/lib/positionDetailCache";
 
 export default function Ability() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [stage, setStage] = useState("greeting");
   const [isTyping, setIsTyping] = useState(false);
@@ -22,6 +25,7 @@ export default function Ability() {
   const msgId = useRef(0);
   const hasChecked = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const userMessagesRef = useRef<string[]>([]);
 
   // 鼠标追踪（全局光晕）
   useEffect(() => {
@@ -52,8 +56,8 @@ export default function Ability() {
     hasChecked.current = true;
     getAbilityPortrait()
       .then((p) => {
-        setPortrait(p);
-        setStage("analysis");
+        if (p) { setPortrait(p); setStage("analysis"); }
+        else { addMessage("ai", ""); sendAiMessage("greeting", ""); }
       })
       .catch(() => {
         addMessage("ai", "");
@@ -121,22 +125,24 @@ export default function Ability() {
       setIsTyping(true);
       try {
         const res = await sendChatMessage(userMessage, currentStage);
-        await new Promise((r) => setTimeout(r, 800));
         setIsTyping(false);
         addMessage("ai", res.reply);
         setStage(res.next_stage);
 
         if (res.portrait_ready) {
-          try {
-            const p = await getAbilityPortrait();
-            setPortrait(p);
-          } catch {
-            setTimeout(async () => {
-              try {
-                const p2 = await getAbilityPortrait();
-                setPortrait(p2);
-              } catch { /* ignore */ }
-            }, 1500);
+          // 汇总全部用户消息，一次性发送给本地模型分析
+          const allText = [...userMessagesRef.current, userMessage].join("\n");
+          if (allText.length >= 20) {
+            try {
+              addMessage("ai", "🔍 正在综合分析你的全部对话内容，生成能力画像...");
+              await submitDescription(allText);
+              if (user?.id) clearUserDetails(user.id);
+              const p = await getAbilityPortrait();
+              setPortrait(p);
+              addMessage("ai", "✅ 能力画像已生成！你可以在上方查看雷达图和详细评分。");
+            } catch {
+              setError("画像生成失败，请点击「生成雷达图」按钮重试");
+            }
           }
         }
       } catch {
@@ -150,6 +156,7 @@ export default function Ability() {
   const handleSend = useCallback(
     (text: string) => {
       setError("");
+      userMessagesRef.current.push(text);
       addMessage("user", text);
       sendAiMessage(stage, text);
     },
@@ -160,18 +167,56 @@ export default function Ability() {
     async (file: File) => {
       setError("");
       setUploading(true);
+      addMessage("ai", "📄 正在解析你的简历，提取教育背景、技能和项目经历...");
       addMessage("user", `[上传了简历: ${file.name}]`);
       try {
         await uploadResume(file);
+        if (user?.id) clearUserDetails(user.id);
         setUploading(false);
-        await sendAiMessage("file_uploaded", file.name);
+        setIsTyping(true);
+        try {
+          const p = await getAbilityPortrait();
+          setIsTyping(false);
+          setPortrait(p);
+          setStage("analysis");
+          addMessage("ai", "✅ 简历解析完成！能力画像已生成，你可以在上方查看雷达图和详细评分。");
+        } catch {
+          setIsTyping(false);
+          setError("画像获取失败，请稍后重试");
+        }
       } catch {
         setUploading(false);
         setError("简历上传失败，请重试");
       }
     },
-    [addMessage, sendAiMessage]
+    [addMessage]
   );
+
+  const handleGeneratePortrait = useCallback(async () => {
+    const userMessages = messages
+      .filter((m) => m.role === "user" && m.content)
+      .map((m) => m.content)
+      .join("\n");
+    if (userMessages.length < 20) {
+      setError("请先输入至少 20 个字的描述信息");
+      return;
+    }
+    setError("");
+    setIsTyping(true);
+    addMessage("ai", "🔍 正在根据你的对话内容分析能力画像...");
+    try {
+      await submitDescription(userMessages);
+      if (user?.id) clearUserDetails(user.id);
+      setIsTyping(false);
+      const p = await getAbilityPortrait();
+      setPortrait(p);
+      setStage("analysis");
+      addMessage("ai", "✅ 能力画像已生成！你可以在上方查看雷达图和详细评分。");
+    } catch {
+      setIsTyping(false);
+      setError("画像生成失败，请重试或继续对话");
+    }
+  }, [messages, addMessage]);
 
   const handleReset = () => {
     setMessages([]);
@@ -179,6 +224,7 @@ export default function Ability() {
     setPortrait(null);
     setError("");
     msgId.current = 0;
+    userMessagesRef.current = [];
     addMessage("ai", "");
     sendAiMessage("greeting", "");
   };
@@ -375,6 +421,23 @@ export default function Ability() {
 
       {/* ====== 输入框区域 ====== */}
       <div className="flex-shrink-0 pb-6 relative z-10">
+        {/* 生成画像按钮：有用户消息且未出画像时显示 */}
+        {!portrait && messages.some((m) => m.role === "user") && (
+          <div className="flex justify-center mb-3">
+            <motion.button
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              onClick={handleGeneratePortrait}
+              disabled={isTyping || uploading}
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-indigo-500/20 to-violet-500/20 backdrop-blur-md border border-indigo-400/30 text-indigo-200/90 text-sm font-medium hover:from-indigo-500/30 hover:to-violet-500/30 hover:border-indigo-400/50 hover:text-indigo-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_24px_rgba(99,102,241,0.12)]"
+            >
+              <Sparkles className="w-4 h-4" />
+              生成雷达图
+            </motion.button>
+          </div>
+        )}
         <ChatInput
           onSend={handleSend}
           onFileSelect={handleFileSelect}

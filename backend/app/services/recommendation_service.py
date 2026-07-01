@@ -1,8 +1,8 @@
 """
-岗位推荐服务：学历过滤 → 相似度匹配（假数据）→ 性格约束过滤 → 推荐理由
+岗位推荐服务：学历过滤 → Embedding匹配 → 性格约束过滤 → LLM推荐理由
 
 规则引擎: 学历硬门槛过滤 + 性格约束过滤
-模型调用: M5 (假数据匹配) + M2-4 (假数据推荐理由)
+模型调用: M5 (Embedding匹配) + M2-4 (LLM推荐理由)
 """
 
 from datetime import datetime
@@ -14,7 +14,7 @@ from app.models.personality import PersonalityResult
 from app.models.position import Position
 from app.models.progress import UserProgress
 from app.models.recommendation import RecommendationRecord
-from app.services.model_interface import vectorize_and_match, write_recommendation
+from app.services.model_interface import vectorize_and_match, batch_write_recommendations_local
 
 
 def get_direction_options(session: Session) -> list[Direction]:
@@ -55,6 +55,16 @@ def recommend(
     # 3. 学历硬门槛过滤（规则引擎）
     filtered = _filter_by_education(positions, user_education)
 
+    # 3.5 按 (title, city) 去重
+    seen = set()
+    deduped = []
+    for p in filtered:
+        key = (p.title, p.city or "")
+        if key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    filtered = deduped
+
     # 4. 性格约束过滤（规则引擎）
     personality = session.exec(
         select(PersonalityResult).where(PersonalityResult.user_id == user_id)
@@ -63,31 +73,39 @@ def recommend(
         direction = session.get(Direction, direction_id)
         filtered = _filter_by_personality(filtered, personality.personality_type, direction)
 
-    # 5. 假数据相似度匹配（M5）
+    # 5. 向量相似度匹配（M5，GPU加速）
     pos_dicts = [
         {"id": p.id, "title": p.title, "description": p.description or ""}
         for p in filtered
     ]
-    matched = vectorize_and_match({}, pos_dicts)
+    user_skills = portrait.raw_extracted_data.get("skills", []) if portrait and portrait.raw_extracted_data else []
+    user_profile = {
+        "education": user_education,
+        "skills": user_skills,
+        "strengths": (portrait.strengths if portrait and portrait.strengths else []),
+        "weaknesses": (portrait.weaknesses if portrait and portrait.weaknesses else []),
+    }
+    matched = vectorize_and_match(user_profile, pos_dicts)
 
-    # 6. 假数据推荐理由（M2-4）+ 写入推荐记录
-    results = []
+    # 6. 写 DB + 组装返回（推荐理由在详情接口按需生成）
+    top_matched = matched[:10]
+    # 清理旧推荐记录
     old_recs = session.exec(
         select(RecommendationRecord).where(RecommendationRecord.user_id == user_id)
     ).all()
     for r in old_recs:
         session.delete(r)
 
-    for item in matched[:10]:  # top 10
+    results = []
+    for item in top_matched:
         pos = session.get(Position, item["position_id"])
         if not pos:
             continue
-        reason = write_recommendation({}, {"title": pos.title})
         session.add(RecommendationRecord(
             user_id=user_id,
             position_id=pos.id,
             match_score=item["match_score"],
-            recommendation_reason=reason,
+            recommendation_reason="",
         ))
         results.append({
             "id": pos.id,
@@ -96,10 +114,10 @@ def recommend(
             "city": pos.city or "",
             "salary_range": pos.salary_range or "",
             "match_score": item["match_score"],
-            "recommendation_reason": reason,
+            "recommendation_reason": "",
         })
 
-    # 7. 更新进度
+    # 8. 更新进度
     progress = session.exec(
         select(UserProgress).where(UserProgress.user_id == user_id)
     ).first()

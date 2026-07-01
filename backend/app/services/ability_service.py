@@ -1,112 +1,126 @@
-"""能力评估服务：编排假数据调用链"""
+"""能力评估服务：pypdf 提取文字 → LM Studio 统一分析 → 写库"""
 
-from sqlmodel import Session
+from io import BytesIO
+from sqlmodel import Session, select
+from datetime import datetime
 
 from app.models.ability import AbilityPortrait
 from app.models.certificate import CertificateRecord
 from app.models.competition import CompetitionRecord
 from app.models.progress import UserProgress
-from app.services.model_interface import (
-    extract_from_pdf,
-    extract_from_text,
-    score_abilities,
-    infer_soft_labels,
-    classify_certificate,
-    classify_competition,
-)
-from sqlmodel import select
-from datetime import datetime
+from app.services.real_models.unified_analyzer import analyze_resume
 
 
 def process_resume_file(session: Session, user_id: int, file_bytes: bytes) -> dict:
-    """上传简历 → 提取 → 分级 → 评分 → 标签"""
-    raw = extract_from_pdf(file_bytes)
-    return _build_portrait(session, user_id, raw)
+    """上传简历 → pypdf 提取文字 → LM Studio 统一分析"""
+    text = _extract_pdf_text(file_bytes)
+    if not text.strip():
+        # PDF 无文字时尝试多模态（保留原 bailian_llm 的图片通路）
+        from app.services.model_interface import extract_from_pdf
+        raw = extract_from_pdf(file_bytes)
+        return _build_portrait(session, user_id, raw)
+
+    result = analyze_resume(text)
+    return _build_portrait(session, user_id, result)
 
 
 def process_description(session: Session, user_id: int, text: str) -> dict:
-    """文字描述 → 提取 → 分级 → 评分 → 标签"""
-    raw = extract_from_text(text)
-    return _build_portrait(session, user_id, raw)
+    """文字描述 → LM Studio 统一分析"""
+    result = analyze_resume(text)
+    return _build_portrait(session, user_id, result)
 
 
-def _build_portrait(session: Session, user_id: int, raw: dict) -> dict:
-    """统一处理：证书竞赛分级 → 评分 → 标签 → 写入DB"""
-    # 证书分级
-    certificates = []
-    for cert in raw.get("certificates", []):
-        result = classify_certificate(cert.get("name", ""))
-        certificates.append({**cert, **result})
+def _extract_pdf_text(file_bytes: bytes) -> str:
+    """pypdf 本地提取 PDF 文字"""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(BytesIO(file_bytes))
+        parts = []
+        for page in reader.pages:
+            t = page.extract_text()
+            if t:
+                parts.append(t)
+        return "\n".join(parts)
+    except Exception:
+        return ""
 
-    # 竞赛分级
-    competitions = []
-    for comp in raw.get("competitions", []):
-        result = classify_competition(comp.get("name", ""))
-        competitions.append({**comp, **result})
 
-    # 三维度评分
-    scores = score_abilities(raw.get("skills", []))
+def _build_portrait(session: Session, user_id: int, result: dict) -> dict:
+    """将统一分析结果写入数据库"""
 
-    # 四软标签
-    labels = infer_soft_labels(raw.get("projects", []))
+    # cert_competition_label 从分类结果汇总
+    certificates = result.get("certificates", [])
+    competitions = result.get("competitions", [])
 
-    # 优势短板
-    strengths = _derive_strengths(scores, labels)
-    weaknesses = _derive_weaknesses(scores, labels)
+    cert_max_score = max((c.get("score", 1) for c in certificates), default=0)
+    comp_max_bonus = max((c.get("bonus_score", 2) for c in competitions), default=0)
+    combined = max(cert_max_score, comp_max_bonus)
+    if combined >= 8:
+        cert_competition_label = "突出"
+    elif combined >= 5:
+        cert_competition_label = "较强"
+    elif combined >= 3:
+        cert_competition_label = "中等"
+    else:
+        cert_competition_label = "一般"
 
-    # 先删子表记录（FK约束），再删父表
-    old_certs = session.exec(
-        select(CertificateRecord).where(CertificateRecord.user_id == user_id)
-    ).all()
-    for c in old_certs:
+    # 补充 label_inference_basis
+    label_basis = result.get("label_inference_basis", {})
+    if "cert_competition" not in label_basis:
+        label_basis["cert_competition"] = (
+            f"证书最高{cert_max_score}分，竞赛最高加{comp_max_bonus}分，综合评定为{cert_competition_label}"
+        )
+
+    # 优势短板：优先用 LLM 给出的，回退到规则推导
+    strengths = result.get("strengths", [])
+    weaknesses = result.get("weaknesses", [])
+    if not strengths or not weaknesses:
+        strengths = _derive_strengths(result, result)
+        weaknesses = _derive_weaknesses(result, result)
+
+    # 清理旧记录
+    for c in session.exec(select(CertificateRecord).where(CertificateRecord.user_id == user_id)).all():
         session.delete(c)
-    old_comps = session.exec(
-        select(CompetitionRecord).where(CompetitionRecord.user_id == user_id)
-    ).all()
-    for c in old_comps:
+    for c in session.exec(select(CompetitionRecord).where(CompetitionRecord.user_id == user_id)).all():
         session.delete(c)
-    existing = session.exec(
-        select(AbilityPortrait).where(AbilityPortrait.user_id == user_id)
-    ).first()
+    existing = session.exec(select(AbilityPortrait).where(AbilityPortrait.user_id == user_id)).first()
     if existing:
         session.delete(existing)
     session.flush()
 
     portrait = AbilityPortrait(
         user_id=user_id,
-        education=raw.get("education", ""),
-        knowledge_score=scores["knowledge_score"],
-        tool_score=scores["tool_score"],
-        project_score=scores["project_score"],
-        scoring_basis=scores.get("scoring_basis", {}),
-        logic_label=labels["logic_label"],
-        communication_label=labels["communication_label"],
-        cert_competition_label=labels["cert_competition_label"],
-        learning_label=labels["learning_label"],
-        label_inference_basis=labels.get("label_inference_basis", {}),
+        education=result.get("education", ""),
+        knowledge_score=result.get("knowledge_score", 50),
+        tool_score=result.get("tool_score", 50),
+        project_score=result.get("project_score", 50),
+        scoring_basis=result.get("scoring_basis", {}),
+        logic_label=result.get("logic_label", "一般"),
+        communication_label=result.get("communication_label", "一般"),
+        cert_competition_label=cert_competition_label,
+        learning_label=result.get("learning_label", "一般"),
+        label_inference_basis=label_basis,
         strengths=strengths,
         weaknesses=weaknesses,
-        raw_extracted_data=raw,
+        raw_extracted_data=result,
     )
     session.add(portrait)
     session.flush()
 
-    # 写入证书记录
     for cert in certificates:
         session.add(CertificateRecord(
             user_id=user_id,
-            ability_portrait_id=portrait.id,  # type: ignore[arg-type]
+            ability_portrait_id=portrait.id,
             certificate_name=cert.get("name", ""),
             level=cert.get("level", 5),
             level_name=cert.get("level_name", "其他"),
             score=cert.get("score", 1),
         ))
 
-    # 写入竞赛记录
     for comp in competitions:
         session.add(CompetitionRecord(
             user_id=user_id,
-            ability_portrait_id=portrait.id,  # type: ignore[arg-type]
+            ability_portrait_id=portrait.id,
             competition_name=comp.get("name", ""),
             level=comp.get("level", 4),
             level_name=comp.get("level_name", "校级"),
@@ -114,9 +128,7 @@ def _build_portrait(session: Session, user_id: int, raw: dict) -> dict:
         ))
 
     # 更新进度
-    progress = session.exec(
-        select(UserProgress).where(UserProgress.user_id == user_id)
-    ).first()
+    progress = session.exec(select(UserProgress).where(UserProgress.user_id == user_id)).first()
     if progress is None:
         progress = UserProgress(user_id=user_id)
         session.add(progress)

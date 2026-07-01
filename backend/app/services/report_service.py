@@ -1,4 +1,4 @@
-"""报告生成服务：汇总四步数据→组装→假数据润色→存DB→生成PDF"""
+"""报告生成服务：汇总四步数据→组装→LLM润色→存DB→生成PDF"""
 
 import os
 from datetime import datetime
@@ -10,7 +10,7 @@ from app.models.trend import TrendAnalysis
 from app.models.development import DevelopmentPath
 from app.models.report import Report
 from app.models.progress import UserProgress
-from app.services.model_interface import polish_report
+from app.services.model_interface import polish_report_local
 from app.config import settings
 
 
@@ -30,14 +30,18 @@ def generate(session: Session, user_id: int) -> dict:
     }
 
     draft = _assemble_text(report_data)
-    polished = polish_report(draft)
+    polished = polish_report_local(draft)
+    report_data["polished"] = polished
 
     existing = session.exec(select(Report).where(Report.user_id == user_id)).all()
     version = len(existing) + 1
 
+    # 先生成 PDF（失败时 pdf_path 为空，不影响 DB 写入）
+    pdf_path = _generate_pdf(user_id, version, report_data)
+
     report = Report(
         user_id=user_id, report_data=report_data,
-        pdf_path=f"reports/report_{user_id}_v{version}.pdf", version=version,
+        pdf_path=pdf_path or "", version=version,
     )
     session.add(report)
 
@@ -48,9 +52,6 @@ def generate(session: Session, user_id: int) -> dict:
 
     session.commit()
     session.refresh(report)
-
-    # 生成PDF
-    _generate_pdf(report.id, user_id, version, report_data)
 
     return {"id": report.id, "version": version, "report_data": report_data, "pdf_path": report.pdf_path}
 
@@ -89,13 +90,65 @@ def _assemble_text(d: dict) -> str:
     return "\n\n".join(sections)
 
 
-def _generate_pdf(report_id: int, user_id: int, version: int, data: dict):
-    """用ReportLab生成简体中文PDF"""
+def _fmt_personality(p: dict | None) -> str:
+    if not p: return "暂无数据"
+    return (
+        f"人格类型：{p.get('type', '')}（强度 {p.get('intensity', '')}）\n"
+        f"EI={p.get('ei', '')}  SN={p.get('sn', '')}  TF={p.get('tf', '')}  JP={p.get('jp', '')}\n"
+        f"优势：{', '.join(p.get('strengths', []))}\n"
+        f"短板：{', '.join(p.get('weaknesses', []))}\n"
+        f"描述：{p.get('portrait', '')}"
+    )
+
+def _fmt_ability(a: dict | None) -> str:
+    if not a: return "暂无数据"
+    return (
+        f"学历：{a.get('education', '')}\n"
+        f"知识={a.get('knowledge', '')}  工具={a.get('tool', '')}  项目={a.get('project', '')}\n"
+        f"逻辑={a.get('logic', '')}  沟通={a.get('communication', '')}  证书竞赛={a.get('cert', '')}  学习={a.get('learning', '')}\n"
+        f"优势：{', '.join(a.get('strengths', []))}\n"
+        f"短板：{', '.join(a.get('weaknesses', []))}"
+    )
+
+def _fmt_recommendations(recs: list | None) -> str:
+    if not recs: return "暂无数据"
+    lines = []
+    for i, r in enumerate(recs[:10], 1):
+        lines.append(f"{i}. 匹配度 {r.get('match_score', 0)}分 — {r.get('reason', '')[:120]}")
+    return "\n".join(lines)
+
+def _fmt_trend(t: dict | None) -> str:
+    if not t: return "暂无数据"
+    lines = []
+    trends = (t.get("trend_data") or {}).get("trends", []) if isinstance(t.get("trend_data"), dict) else []
+    for item in trends[:6]:
+        lines.append(f"【{item.get('dimension', '')}】{item.get('content', '')}")
+    if t.get("risk_warnings"):
+        lines.append(f"\n风险提示：{'；'.join(t['risk_warnings'][:5])}")
+    return "\n".join(lines) if lines else "暂无趋势数据"
+
+def _fmt_path(dp: dict | None) -> str:
+    if not dp: return "暂无数据"
+    parts = []
+    for label, key in [("短期", "short"), ("中期", "mid"), ("长期", "long")]:
+        d = dp.get(key, {})
+        if d:
+            parts.append(f"【{label}】{d.get('duration', '')}\n目标：{d.get('goal', '')}\n技能：{', '.join(d.get('skills', []))}")
+            if d.get('milestones'):
+                parts[-1] += f"\n里程碑：{', '.join(d['milestones'])}"
+            if d.get('directions'):
+                parts[-1] += f"\n方向：{', '.join(d['directions'])}"
+            if d.get('advanced_skills'):
+                parts[-1] += f"\n高阶技能：{', '.join(d['advanced_skills'])}"
+    return "\n\n".join(parts) if parts else "暂无发展路径数据"
+
+
+def _generate_pdf(user_id: int, version: int, data: dict) -> str | None:
+    """用ReportLab生成简体中文PDF。失败返回 None，不阻断主流程。"""
     try:
         from reportlab.pdfgen import canvas
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-        import json
 
         pdf_dir = os.path.abspath(settings.REPORT_DIR)
         os.makedirs(pdf_dir, exist_ok=True)
@@ -125,21 +178,20 @@ def _generate_pdf(report_id: int, user_id: int, version: int, data: dict):
         c.drawString(50, y, f"职业规划综合报告 — 版本 {version}"); y -= 30
 
         sections = [
-            ("性格画像", data.get("personality")),
-            ("能力画像", data.get("ability")),
-            ("岗位推荐", data.get("recommendations")),
-            ("行业趋势", data.get("trend")),
-            ("发展路径", data.get("path")),
+            ("性格画像", _fmt_personality(data.get("personality"))),
+            ("能力画像", _fmt_ability(data.get("ability"))),
+            ("岗位推荐", _fmt_recommendations(data.get("recommendations"))),
+            ("行业趋势", _fmt_trend(data.get("trend"))),
+            ("发展路径", _fmt_path(data.get("path"))),
         ]
 
-        for title, content in sections:
+        for title, text in sections:
             if y < 100:
                 c.showPage()
                 if font_registered: c.setFont("ChineseFont", 12)
                 else: c.setFont("Helvetica", 10)
                 y = 800
             c.drawString(50, y, f"--- {title} ---"); y -= 20
-            text = json.dumps(content, ensure_ascii=False, indent=2) if content else "暂无数据"
             for line in text.split("\n"):
                 if y < 50:
                     c.showPage()
@@ -151,5 +203,7 @@ def _generate_pdf(report_id: int, user_id: int, version: int, data: dict):
 
         c.save()
         return pdf_path
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("career").warning(f"PDF生成失败 (user={user_id} v{version}): {e}")
         return None

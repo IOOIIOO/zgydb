@@ -27,11 +27,15 @@ export default function Personality() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    // 始终预加载题目（"重做"按钮需要）
+    getMbtiQuestions()
+      .then((d) => { setQuestions(d.questions || []); })
+      .catch(() => setError("加载题目失败"));
+
+    // 检查已有结果：有→展示结果，无→答题模式
     getPersonalityResult()
-      .then((r) => { setResult(r); setMode("result"); })
-      .catch(() => getMbtiQuestions()
-        .then((d) => { setQuestions(d.questions || []); setMode("answer"); })
-        .catch(() => setError("加载题目失败")));
+      .then((r) => { if (r) { setResult(r); setMode("result"); } else { setMode("answer"); } })
+      .catch(() => { setMode("answer"); });
   }, []);
 
   const pick = (choice: "a" | "b") => {

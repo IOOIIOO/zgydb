@@ -4,6 +4,8 @@ import { getDirectionOptions, getRecommendations } from "../../api/recommendatio
 import { getPositionDetail } from "../../api/positions";
 import type { Direction, RecommendationRecord, PositionDetail } from "../../types";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
+import { getCachedDetail, setCachedDetail } from "../../lib/positionDetailCache";
 import {
   Loader2, ArrowRight, ArrowLeft, Target, MapPin,
   CheckCircle2, AlertCircle, TrendingUp, Wrench, BookOpen,
@@ -20,6 +22,7 @@ type Screen = "select" | "positions";
 
 export default function DirectionSelect() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [screen, setScreen] = useState<Screen>("select");
   const [directions, setDirections] = useState<Direction[]>([]);
   const [selectedDirectionId, setSelectedDirectionId] = useState<number | null>(null);
@@ -30,6 +33,7 @@ export default function DirectionSelect() {
   const [loadingDirections, setLoadingDirections] = useState(true);
   const [loadingPositions, setLoadingPositions] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -54,8 +58,9 @@ export default function DirectionSelect() {
         setSelectedPositionId(r[0].id);
         loadPositionDetail(r[0].id);
       }
-    } catch {
-      setError("加载推荐岗位失败");
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e?.message || "加载推荐岗位失败";
+      setError(msg);
     } finally {
       setLoadingPositions(false);
     }
@@ -63,11 +68,22 @@ export default function DirectionSelect() {
 
   const loadPositionDetail = async (positionId: number) => {
     setLoadingDetail(true);
+    setDetailError("");
+    const uid = user?.id;
+    if (uid) {
+      const cached = getCachedDetail(uid, positionId);
+      if (cached) {
+        setPositionDetail(cached);
+        setLoadingDetail(false);
+        return;
+      }
+    }
     try {
       const detail = await getPositionDetail(positionId);
       setPositionDetail(detail);
+      if (uid) setCachedDetail(uid, positionId, detail);
     } catch {
-      setError("加载岗位详情失败");
+      setDetailError("岗位详情加载失败，请点击重试");
     } finally {
       setLoadingDetail(false);
     }
@@ -113,15 +129,36 @@ export default function DirectionSelect() {
         </motion.div>
 
         {error && (
-          <div className="mb-6 p-3 rounded-xl bg-rose-500/[0.04] border border-rose-500/[0.1] text-rose-400/80 text-sm">
-            {error}
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl bg-rose-500/[0.08] backdrop-blur-md border border-rose-500/[0.2] text-rose-300/90 text-sm flex items-center gap-3"
+          >
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span>{error}</span>
+          </motion.div>
+        )}
+
+        {/* Loading overlay：点击方向后显示进度 */}
+        {loadingPositions && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-6 p-5 rounded-xl bg-indigo-500/[0.06] backdrop-blur-md border border-indigo-400/20 flex items-center gap-4"
+          >
+            <Loader2 className="w-5 h-5 text-indigo-400/70 animate-spin flex-shrink-0" />
+            <div>
+              <p className="text-indigo-200/80 text-sm font-medium">正在分析岗位匹配...</p>
+              <p className="text-white/25 text-xs mt-0.5">系统正在根据你的能力画像计算最佳岗位推荐</p>
+            </div>
+          </motion.div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {directions.map((d, i) => (
             <motion.button
               key={d.id}
+              disabled={loadingPositions}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
@@ -272,9 +309,27 @@ export default function DirectionSelect() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="flex items-center justify-center py-32"
+                  className="flex flex-col items-center justify-center py-32 gap-4"
                 >
-                  <Loader2 className="w-6 h-6 text-white/10 animate-spin" />
+                  <Loader2 className="w-8 h-8 text-white/15 animate-spin" />
+                  <p className="text-white/20 text-sm">请稍等，系统正在分析…</p>
+                </motion.div>
+              ) : detailError ? (
+                <motion.div
+                  key="error"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center py-32 gap-4"
+                >
+                  <AlertCircle className="w-8 h-8 text-rose-400/40" />
+                  <p className="text-rose-300/70 text-sm">{detailError}</p>
+                  <button
+                    onClick={() => selectedPositionId && loadPositionDetail(selectedPositionId)}
+                    className="px-4 py-2 rounded-full bg-white/[0.04] border border-white/[0.08] text-white/50 text-sm hover:bg-white/[0.08] transition-colors"
+                  >
+                    重新加载
+                  </button>
                 </motion.div>
               ) : positionDetail ? (
                 <motion.div
@@ -283,32 +338,12 @@ export default function DirectionSelect() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -12 }}
                   transition={{ duration: 0.25 }}
-                  className="space-y-5"
+                  className="space-y-4"
                 >
-                  {/* 岗位基本信息卡片 */}
-                  <div className="p-6 rounded-2xl bg-white/[0.015] border border-white/[0.06]">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h2 className="text-xl font-bold text-white">{positionDetail.title}</h2>
-                        <div className="flex items-center gap-4 mt-2 text-sm text-white/30">
-                          {positionDetail.city && (
-                            <span className="inline-flex items-center gap-1">
-                              <MapPin className="w-3.5 h-3.5" /> {positionDetail.city}
-                            </span>
-                          )}
-                          {positionDetail.salary_range && (
-                            <span className="inline-flex items-center gap-1">
-                              <Target className="w-3.5 h-3.5" /> {positionDetail.salary_range}
-                            </span>
-                          )}
-                          {positionDetail.industry && (
-                            <span className="inline-flex items-center gap-1">
-                              <Building2 className="w-3.5 h-3.5" /> {positionDetail.industry}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {/* 综合匹配度 */}
+                  {/* ====== 卡片1: 岗位基本信息 ====== */}
+                  <div className="p-5 rounded-2xl bg-white/[0.015] border border-white/[0.06]">
+                    <div className="flex items-start justify-between mb-3">
+                      <h2 className="text-xl font-bold text-white">{positionDetail.title}</h2>
                       <div className="flex-shrink-0 flex flex-col items-center">
                         <span className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-300 to-rose-300">
                           {positionDetail.match_analysis.overall_match_score}
@@ -316,140 +351,142 @@ export default function DirectionSelect() {
                         <span className="text-white/20 text-xs">综合匹配度</span>
                       </div>
                     </div>
-                    <p className="text-white/35 text-sm leading-relaxed">
-                      {positionDetail.description}
-                    </p>
-                  </div>
-
-                  {/* 三维度匹配对比 */}
-                  <div className="p-6 rounded-2xl bg-white/[0.015] border border-white/[0.06]">
-                    <h3 className="text-white/50 font-semibold text-sm mb-4 flex items-center gap-2">
-                      <Zap className="w-4 h-4 text-amber-400/60" /> 能力维度匹配对比
-                    </h3>
-                    <div className="space-y-4">
-                      {[
-                        {
-                          key: "knowledge_match",
-                          label: "知识",
-                          icon: BookOpen,
-                          data: positionDetail.match_analysis.knowledge_match,
-                        },
-                        {
-                          key: "tool_match",
-                          label: "工具",
-                          icon: Wrench,
-                          data: positionDetail.match_analysis.tool_match,
-                        },
-                        {
-                          key: "project_match",
-                          label: "项目",
-                          icon: TrendingUp,
-                          data: positionDetail.match_analysis.project_match,
-                        },
-                      ].map(({ key, label, icon: Icon, data }) => (
-                        <div key={key} className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-white/45 text-sm flex items-center gap-1.5">
-                              <Icon className="w-3.5 h-3.5" /> {label}
-                            </span>
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full ${
-                                data.verdict === "match"
-                                  ? "bg-emerald-500/10 text-emerald-400/80"
-                                  : data.verdict === "partial"
-                                    ? "bg-amber-500/10 text-amber-400/80"
-                                    : "bg-rose-500/10 text-rose-400/80"
-                              }`}
-                            >
-                              {data.verdict === "match" ? "✓ 匹配" : data.verdict === "partial" ? "△ 部分匹配" : "✗ 不匹配"}
-                            </span>
-                          </div>
-                          {/* 进度条对比 */}
-                          <div className="flex items-center gap-3">
-                            <span className="text-white/20 text-xs w-8 text-right">你 {data.user_score}</span>
-                            <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-indigo-400/60 to-indigo-400/30"
-                                style={{ width: `${(data.user_score / 100) * 100}%` }}
-                              />
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-white/20 text-xs w-8 text-right">要求 {data.required_score}</span>
-                            <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-white/[0.15]"
-                                style={{ width: `${(data.required_score / 100) * 100}%` }}
-                              />
-                            </div>
-                          </div>
-                          <p className="text-white/25 text-xs mt-1">{data.detail}</p>
-                        </div>
-                      ))}
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      {positionDetail.city && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/[0.03] border border-white/[0.05] text-white/40">
+                          <MapPin className="w-3 h-3" /> {positionDetail.city}
+                        </span>
+                      )}
+                      {positionDetail.salary_range && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/[0.03] border border-white/[0.05] text-white/40">
+                          <Target className="w-3 h-3" /> {positionDetail.salary_range}
+                        </span>
+                      )}
+                      {positionDetail.industry && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/[0.03] border border-white/[0.05] text-white/40">
+                          <Building2 className="w-3 h-3" /> {positionDetail.industry}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-sm">
+                      <Shield className="w-4 h-4 text-emerald-400/60" />
+                      <span className="text-white/30">学历要求：</span>
+                      <span className="text-white/55 font-medium">{positionDetail.education_requirement || "本科"}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${
+                        positionDetail.match_analysis.education_match?.verdict === "mismatch"
+                          ? "bg-rose-500/10 text-rose-400/80"
+                          : "bg-emerald-500/10 text-emerald-400/80"
+                      }`}>
+                        {positionDetail.match_analysis.education_match?.verdict === "mismatch" ? "✗ 不满足" : "✓ 满足"}
+                      </span>
                     </div>
                   </div>
 
-                  {/* 学历匹配 */}
-                  <div className="p-4 rounded-xl bg-white/[0.01] border border-white/[0.04] flex items-center gap-3">
-                    <Shield className="w-4 h-4 text-emerald-400/60" />
-                    <span className="text-white/40 text-sm">学历要求：</span>
-                    <span className="text-white/60 text-sm font-medium">
-                      {positionDetail.match_analysis.education_match.required_education}
-                    </span>
-                    <span className="text-white/20 text-sm">· 你的学历：</span>
-                    <span className="text-white/60 text-sm font-medium">
-                      {positionDetail.match_analysis.education_match.user_education}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400/80 text-xs ml-auto">
-                      ✓ 满足
-                    </span>
+                  {/* ====== 卡片2: 匹配分析 ====== */}
+                  <div className="p-5 rounded-2xl bg-white/[0.015] border border-white/[0.06]">
+                    <h3 className="text-white/50 font-semibold text-sm mb-4 flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-400/60" /> 能力维度匹配对比
+                    </h3>
+                    <div className="space-y-3">
+                      {[
+                        { key: "knowledge_match", label: "知识", icon: BookOpen, data: positionDetail.match_analysis.knowledge_match },
+                        { key: "tool_match", label: "工具", icon: Wrench, data: positionDetail.match_analysis.tool_match },
+                        { key: "project_match", label: "项目", icon: TrendingUp, data: positionDetail.match_analysis.project_match },
+                      ].map(({ key, label, icon: Icon, data }) => {
+                        const d = data || { user_score: 0, required_score: 0, verdict: "mismatch", detail: "" };
+                        return (
+                          <div key={key} className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-white/45 text-sm flex items-center gap-1.5">
+                                <Icon className="w-3.5 h-3.5" /> {label}
+                              </span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                d.verdict === "match" ? "bg-emerald-500/10 text-emerald-400/80"
+                                : d.verdict === "partial" ? "bg-amber-500/10 text-amber-400/80"
+                                : "bg-rose-500/10 text-rose-400/80"
+                              }`}>
+                                {d.verdict === "match" ? "✓ 匹配" : d.verdict === "partial" ? "△ 部分匹配" : "✗ 不匹配"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-white/20 text-xs w-8 text-right">你 {d.user_score}</span>
+                              <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                                <div className="h-full rounded-full bg-gradient-to-r from-indigo-400/60 to-indigo-400/30" style={{ width: `${Math.min((d.user_score / 100) * 100, 100)}%` }} />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-white/20 text-xs w-8 text-right">要求 {d.required_score}</span>
+                              <div className="flex-1 h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+                                <div className="h-full rounded-full bg-white/[0.15]" style={{ width: `${Math.min((d.required_score / 100) * 100, 100)}%` }} />
+                              </div>
+                            </div>
+                            {d.detail && <p className="text-white/25 text-xs">{d.detail}</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {positionDetail.match_analysis.recommendation_reason && (
+                      <div className="mt-4 p-4 rounded-xl bg-indigo-500/[0.03] border border-indigo-500/[0.08]">
+                        <h3 className="text-indigo-300/60 font-semibold text-sm mb-1.5">💡 匹配分析</h3>
+                        <p className="text-white/35 text-sm leading-relaxed">{positionDetail.match_analysis.recommendation_reason}</p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* 推荐理由 */}
-                  <div className="p-5 rounded-2xl bg-indigo-500/[0.03] border border-indigo-500/[0.08]">
-                    <h3 className="text-indigo-300/60 font-semibold text-sm mb-2">💡 匹配分析</h3>
-                    <p className="text-white/35 text-sm leading-relaxed">
-                      {positionDetail.match_analysis.recommendation_reason}
-                    </p>
-                  </div>
+                  {/* ====== 卡片3: 岗位详情 ====== */}
+                  {positionDetail.description && (
+                    <div className="p-5 rounded-2xl bg-white/[0.015] border border-white/[0.06]">
+                      <h3 className="text-white/50 font-semibold text-sm mb-3">📋 岗位详情</h3>
+                      <div className="text-white/35 text-sm leading-relaxed whitespace-pre-line max-h-80 overflow-y-auto">
+                        {positionDetail.description}
+                      </div>
+                    </div>
+                  )}
 
                   {/* 优势 + 差距 两列 */}
                   <div className="grid grid-cols-2 gap-4">
-                    {/* 优势 */}
                     <div className="p-4 rounded-2xl bg-emerald-500/[0.02] border border-emerald-500/[0.08]">
                       <h3 className="text-emerald-400/60 font-semibold text-sm mb-3 flex items-center gap-1.5">
                         <CheckCircle2 className="w-4 h-4" /> 你的优势
                       </h3>
                       <div className="space-y-2">
-                        {positionDetail.match_analysis.strength_points.map((sp) => (
-                          <div key={sp.skill} className="flex items-center justify-between">
-                            <span className="text-white/55 text-sm">{sp.skill}</span>
-                            <span className="text-emerald-400/40 text-xs">{sp.level}</span>
-                          </div>
-                        ))}
+                        {(positionDetail.match_analysis.strength_points || []).length > 0 ? (
+                          positionDetail.match_analysis.strength_points.map((sp: any) => (
+                            <div key={sp.skill} className="flex items-center justify-between">
+                              <span className="text-white/55 text-sm">{sp.skill}</span>
+                              <span className="text-emerald-400/40 text-xs">{sp.level}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-white/20 text-sm">暂无优势分析</p>
+                        )}
                       </div>
                     </div>
-                    {/* 差距 */}
                     <div className="p-4 rounded-2xl bg-amber-500/[0.02] border border-amber-500/[0.08]">
                       <h3 className="text-amber-400/60 font-semibold text-sm mb-3 flex items-center gap-1.5">
                         <AlertCircle className="w-4 h-4" /> 建议提升
                       </h3>
                       <div className="space-y-3">
-                        {positionDetail.match_analysis.skill_gaps.map((gap) => (
-                          <div key={gap.skill}>
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="text-white/55 text-sm">{gap.skill}</span>
-                              <span className="text-amber-400/40 text-xs">[{gap.importance}]</span>
+                        {(positionDetail.match_analysis.skill_gaps || []).length > 0 ? (
+                          positionDetail.match_analysis.skill_gaps.map((gap: any) => (
+                            <div key={gap.skill}>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-white/55 text-sm">{gap.skill}</span>
+                                <span className="text-amber-400/40 text-xs">[{gap.importance}]</span>
+                              </div>
+                              <p className="text-white/20 text-xs">{gap.suggestion}</p>
                             </div>
-                            <p className="text-white/20 text-xs">{gap.suggestion}</p>
-                          </div>
-                        ))}
+                          ))
+                        ) : (
+                          <p className="text-white/20 text-sm">暂无提升建议</p>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   {/* 底部操作按钮 */}
-                  <div className="flex items-center justify-end pt-4 pb-8">
+                  <div className="flex items-center justify-end pt-2 pb-8">
                     <button
                       onClick={handleConfirmPosition}
                       className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-white text-[#030303] font-semibold text-sm hover:bg-white/90 transition-all"

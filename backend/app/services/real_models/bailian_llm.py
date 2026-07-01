@@ -60,10 +60,11 @@ def extract_from_pdf(file_bytes: bytes) -> dict:
     text = client.chat([
         {"role": "system", "content": (
             "你是简历信息提取专家。从图片简历中提取以下字段，严格返回JSON：\n"
-            '{"education":"学历","school":"学校","major":"专业",'
+            '{"education":"博士|硕士|本科|大专|中专|高中","school":"学校","major":"专业",'
             '"skills":["技能1","技能2"],'
             '"certificates":[{"name":"证书名"}],"competitions":[{"name":"竞赛名"}],'
             '"projects":[{"name":"项目名","role":"角色","tech_stack":["技术"],"description":"描述"}]}\n'
+            "education 字段必须从 博士/硕士/本科/大专/中专/高中 中选一个最匹配的值。"
             "缺失字段用空字符串或空数组。严格只返回JSON。"
         )},
         {"role": "user", "content": [
@@ -89,91 +90,116 @@ def _empty_extract() -> dict:
 def extract_from_text(description: str) -> dict:
     """从用户自由文本中提取结构化能力信息"""
     client = get_client()
-    try:
-        return client.chat_json([
-            {"role": "system", "content": (
-                "你是简历信息提取专家。从用户描述中提取以下字段，严格返回JSON：\n"
-                '{"education":"学历","skills":["技能1","技能2"],'
-                '"certificates":[{"name":"证书名"}],"competitions":[{"name":"竞赛名"}],'
-                '"projects":[{"name":"项目名","role":"角色","tech_stack":["技术"],"description":"描述"}]}\n'
-                "缺失字段用空字符串或空数组。严格只返回JSON，不解释。"
-            )},
-            {"role": "user", "content": description},
-        ], temperature=0.1)
-    except Exception:
-        return _empty_extract()
+    return client.chat_json([
+        {"role": "system", "content": (
+            "从用户描述提取简历信息，返回JSON：\n"
+            '{"education":"博士|硕士|本科|大专|中专|高中","skills":["技能"],'
+            '"certificates":[{"name":"证书名"}],"competitions":[{"name":"竞赛名"}],'
+            '"projects":[{"name":"项目名","role":"角色","tech_stack":["技术"],"description":"简述"}]}\n'
+            "education 必须从 博士/硕士/本科/大专/中专/高中 选一个。缺失用空值。"
+        )},
+        {"role": "user", "content": description[:800]},
+    ], temperature=0.1, max_tokens=600)
 
 
 # ==================== M2-2: 三维度评分 ====================
 
-def score_abilities(skills: list) -> dict:
-    """基于技能清单评分"""
+def score_abilities(skills: list, education: str = "", projects: list = None, competitions: list = None) -> dict:
+    """基于技能清单 + 学历/项目/竞赛背景综合评分"""
     client = get_client()
-    try:
-        return client.chat_json([
-            {"role": "system", "content": (
-                "你是大学生能力评估专家。根据技能清单对三个维度评分(0-100)并给出依据，严格返回JSON：\n"
-                '{"knowledge_score":数字,"tool_score":数字,"project_score":数字,'
-                '"scoring_basis":{"knowledge":"依据","tool":"依据","project":"依据"}}\n'
-                "评分标准：60以下=薄弱，60-75=中等，76-85=良好，86-100=优秀。只返回JSON。"
-            )},
-            {"role": "user", "content": f"技能清单：{', '.join(skills) if skills else '无记录'}"},
-        ], temperature=0.2)
-    except Exception:
-        return {"knowledge_score": 72, "tool_score": 78, "project_score": 65,
-                "scoring_basis": {"knowledge": "", "tool": "", "project": ""}}
+    context_parts = [f"技能：{', '.join(skills[:10]) if skills else '无'}"]
+    if education:
+        context_parts.append(f"学历：{education}")
+    if projects:
+        proj_names = [p.get("name", "") for p in projects if isinstance(p, dict)][:3]
+        if proj_names:
+            context_parts.append(f"项目：{', '.join(proj_names)}")
+    if competitions:
+        comp_names = [c.get("name", "") for c in competitions if isinstance(c, dict)][:3]
+        if comp_names:
+            context_parts.append(f"竞赛：{', '.join(comp_names)}")
+    context = "；".join(context_parts)
+
+    return client.chat_json([
+        {"role": "system", "content": (
+            "根据学生背景评三维分数(0-100)，返回JSON：\n"
+            '{"knowledge_score":数字,"tool_score":数字,"project_score":数字,'
+            '"scoring_basis":{"knowledge":"依据","tool":"依据","project":"依据"}}\n'
+            "标准：60下=薄弱，60-75=中等，76-85=良好，86-100=优秀。依据20字内。"
+        )},
+        {"role": "user", "content": context[:400]},
+    ], temperature=0.2, max_tokens=400)
 
 
 # ==================== M2-4: 推荐理由 ====================
 
 def write_recommendation(user_profile: dict, position: dict) -> str:
-    """撰写个性化岗位推荐理由"""
+    """撰写个性化岗位推荐理由（单个，保留向后兼容）"""
     client = get_client()
-    try:
-        return client.chat([
-            {"role": "system", "content": (
-                "你是职业规划顾问。为大学生写一段100-200字的岗位推荐理由，"
-                "结合其能力画像和岗位要求，语言诚恳具体。"
-            )},
-            {"role": "user", "content": f"学生画像：{user_profile}\n岗位：{position}"},
-        ], temperature=0.7, max_tokens=400)
-    except Exception:
-        return f"根据你的能力画像分析，{position.get('title', '该岗位')}与你的技能匹配度较高，建议重点关注。"
+    return client.chat([
+        {"role": "system", "content": "为大学生写50字内岗位推荐理由，结合能力画像和岗位要求，诚恳具体。"},
+        {"role": "user", "content": f"画像：{json.dumps(user_profile, ensure_ascii=False)[:200]}\n岗位：{position.get('title','')}"},
+    ], temperature=0.7, max_tokens=150)
+
+
+def batch_write_recommendations(user_profile: dict, positions: list[dict]) -> dict[int, str]:
+    """批量生成推荐理由：一次 LLM 调用为所有岗位生成理由"""
+    if not positions:
+        return {}
+
+    client = get_client()
+    pos_summaries = []
+    for p in positions:
+        pos_summaries.append({
+            "position_id": p.get("position_id") or p.get("id"),
+            "title": p.get("title", ""),
+            "description": (p.get("description", "") or "")[:100],
+        })
+
+    result = client.chat_json([
+        {"role": "system", "content": (
+            "为每个岗位写40字内推荐理由，结合用户技能。返回JSON：\n"
+            '{"reasons":[{"position_id":数字,"reason":"理由"}]}'
+        )},
+        {"role": "user", "content": (
+            f"画像：{json.dumps(user_profile, ensure_ascii=False)[:200]}\n"
+            f"岗位：{json.dumps(pos_summaries, ensure_ascii=False)}"
+        )},
+    ], temperature=0.7, max_tokens=600)
+    reasons = result.get("reasons", []) if result else []
+
+    reason_map: dict[int, str] = {}
+    for r in reasons:
+        pid = r.get("position_id")
+        if pid is not None:
+            reason_map[int(pid)] = r.get("reason", "")
+
+    for p in positions:
+        pid = p.get("position_id") or p.get("id")
+        if pid not in reason_map:
+            reason_map[pid] = ""
+
+    return reason_map
 
 
 # ==================== M2-4ext: 岗位匹配分析 ====================
 
 def analyze_position_match(user_portrait: dict, position: dict) -> dict:
-    """逐维度分析用户与岗位匹配度"""
+    """逐维度分析用户与岗位匹配度（定性分析，不负责整体打分）"""
     client = get_client()
-    try:
-        return client.chat_json([
-            {"role": "system", "content": (
-                "你是岗位匹配分析专家。根据用户能力画像和岗位描述，进行三维度对比分析，严格返回JSON：\n"
-                '{\n'
-                '  "knowledge_match":{"user_score":数字,"required_score":数字,"verdict":"match|partial|mismatch","detail":"分析"},\n'
-                '  "tool_match":{"user_score":数字,"required_score":数字,"verdict":"match|partial|mismatch","detail":"分析"},\n'
-                '  "project_match":{"user_score":数字,"required_score":数字,"verdict":"match|partial|mismatch","detail":"分析"},\n'
-                '  "overall_match_score":数字,\n'
-                '  "recommendation_reason":"综合推荐理由",\n'
-                '  "skill_gaps":[{"skill":"技能名","importance":"重要|加分","suggestion":"学习建议"}],\n'
-                '  "strength_points":[{"skill":"技能名","level":"熟练|良好|精通"}],\n'
-                '  "education_match":{"user_education":"学历","required_education":"学历","verdict":"match|mismatch"}\n'
-                '}\n'
-                "只返回JSON，不解释。"
-            )},
-            {"role": "user", "content": f"用户画像：{user_portrait}\n岗位：{position}"},
-        ], temperature=0.2)
-    except Exception:
-        return {
-            "knowledge_match": {"user_score": 70, "required_score": 70, "verdict": "match", "detail": ""},
-            "tool_match": {"user_score": 75, "required_score": 75, "verdict": "match", "detail": ""},
-            "project_match": {"user_score": 60, "required_score": 60, "verdict": "match", "detail": ""},
-            "overall_match_score": 72,
-            "recommendation_reason": "综合能力匹配",
-            "skill_gaps": [], "strength_points": [],
-            "education_match": {"user_education": "本科", "required_education": "本科", "verdict": "match"},
-        }
+    return client.chat_json([
+        {"role": "system", "content": (
+            "对比用户画像和岗位，返回JSON：\n"
+            '{"knowledge_match":{"user_score":数字,"required_score":数字,"verdict":"match|partial|mismatch","detail":"20字内"},'
+            '"tool_match":{"user_score":数字,"required_score":数字,"verdict":"match|partial|mismatch","detail":"20字内"},'
+            '"project_match":{"user_score":数字,"required_score":数字,"verdict":"match|partial|mismatch","detail":"20字内"},'
+            '"recommendation_reason":"50字内推荐理由",'
+            '"skill_gaps":[{"skill":"技能","importance":"重要|加分","suggestion":"建议"}],'
+            '"strength_points":[{"skill":"技能","level":"熟练|良好|精通"}],'
+            '"education_match":{"user_education":"学历","required_education":"学历","verdict":"match|mismatch"}}'
+        )},
+        {"role": "user", "content": f"画像：{json.dumps(user_portrait, ensure_ascii=False)[:200]}\n岗位：{position.get('title','')[:50]}"},
+    ], temperature=0.2, max_tokens=600)
 
 
 # ==================== M2-5: 报告润色 ====================
@@ -183,12 +209,9 @@ def polish_report(draft: str) -> str:
     client = get_client()
     try:
         return client.chat([
-            {"role": "system", "content": (
-                "你是文字编辑。润色以下报告，修正语病、统一风格、提升专业感，"
-                "保持原意和结构不变，不缩写内容。"
-            )},
-            {"role": "user", "content": draft},
-        ], temperature=0.5, max_tokens=4096)
+            {"role": "system", "content": "精简润色报告，修正语病，保持原意，删除冗余表述。"},
+            {"role": "user", "content": draft[:1500]},
+        ], temperature=0.5, max_tokens=1024)
     except Exception:
         return draft  # 失败时返回原文
 
@@ -214,9 +237,11 @@ def chat_response(stage: str, user_message: str) -> dict:
             {"role": "user", "content": user_message or "开始"},
         ], temperature=0.7, max_tokens=500)
     except Exception:
-        # fallback to fake data
-        from app.services.fake_data.general_llm import FAKE_chat_response
-        return FAKE_chat_response(stage, user_message)
+        return {
+            "reply": "抱歉，AI 服务暂时不可用，请稍后重试。",
+            "next_stage": _next_stage(stage),
+            "portrait_ready": stage in ("ask_certificates", "file_uploaded"),
+        }
 
     portrait_ready = "[PORTRAIT_READY]" in reply or stage in ("ask_certificates", "file_uploaded")
     reply_clean = reply.replace("[PORTRAIT_READY]", "").strip()
@@ -242,39 +267,92 @@ def _next_stage(current: str) -> str:
 # ==================== M3: 搜索 ====================
 
 def search_trends(direction_name: str) -> dict:
-    """搜索行业趋势（签名与 FAKE_search_trends 兼容）"""
+    """搜索行业趋势，返回包含6个命名维度字段 + trends数组 + resources的完整结构"""
     client = get_client()
-    text = client.chat_with_search([
-        {"role": "system", "content": (
-            "你是行业趋势分析师。搜索并分析指定职业方向的最新发展趋势，严格返回JSON：\n"
-            '{"trends":[{"dimension":"维度名","content":"分析内容（100字内）","score":数字}],"resources":[]}\n'
-            "至少返回6个维度。只返回JSON，不解释。"
-        )},
-        {"role": "user", "content": f"分析'{direction_name}'职业方向的最新行业趋势，包括技术发展、市场需求、薪资水平、技能要求等维度"},
-    ], temperature=0.3, max_tokens=4096)
+    try:
+        text = client.chat_with_search([
+            {"role": "system", "content": (
+                "分析职业方向趋势，返回JSON：\n"
+                '{"overview":"3-5年走向60字内",'
+                '"tech_impact":"技术冲击60字内",'
+                '"regional_demand":"地域差异60字内",'
+                '"salary_trend":"薪资走向60字内",'
+                '"entry_barrier":"门槛变化60字内",'
+                '"personal_analysis":"个体影响60字内",'
+                '"risk_warnings":["风险1","风险2","风险3"],'
+                '"resources":[{"title":"标题","url":"真实链接"}]}\n'
+                "url必须是搜索结果中的真实链接，无则留空。"
+            )},
+            {"role": "user", "content": f"分析'{direction_name}'方向的最新趋势"},
+        ], temperature=0.3, max_tokens=1024)
+    except Exception:
+        return _empty_trends(direction_name)
 
     try:
         match = re.search(r"\{[\s\S]*\}", text)
-        return json.loads(match.group(0)) if match else {"trends": [], "resources": []}
+        if not match:
+            return _empty_trends(direction_name)
+        data = json.loads(match.group(0))
     except Exception:
-        return {"trends": [], "resources": []}
+        return _empty_trends(direction_name)
+
+    # 构造 trends 数组供报告页面使用
+    dim_map = [
+        ("overview", "3-5年发展趋势"),
+        ("tech_impact", "技术变革影响"),
+        ("regional_demand", "地域需求差异"),
+        ("salary_trend", "薪资走向"),
+        ("entry_barrier", "入门门槛变化"),
+        ("personal_analysis", "个体影响分析"),
+    ]
+    trends = []
+    for key, label in dim_map:
+        content = data.get(key, "")
+        if content:
+            trends.append({"dimension": label, "content": content, "score": 0})
+    data["trends"] = trends
+
+    if "risk_warnings" not in data:
+        data["risk_warnings"] = []
+    if "resources" not in data:
+        data["resources"] = []
+
+    return data
+
+
+def _empty_trends(name: str) -> dict:
+    return {
+        "overview": "", "tech_impact": "", "regional_demand": "",
+        "salary_trend": "", "entry_barrier": "", "personal_analysis": "",
+        "risk_warnings": [],
+        "resources": [],
+        "trends": [],
+    }
 
 
 def search_resources(direction_name: str) -> list[dict]:
     """搜索学习资源推荐（签名与 FAKE_search_resources 兼容：输入 str，返回 list）"""
     client = get_client()
-    text = client.chat_with_search([
-        {"role": "system", "content": (
-            "你是学习资源规划师。根据职业方向搜索推荐学习资源，严格返回JSON：\n"
-            '{"resources":[{"title":"资源名称","type":"课程|书籍|项目|社区","url":"","description":"推荐理由（80字内）","score":数字}]}\n'
-            "至少返回5条资源。只返回JSON。"
-        )},
-        {"role": "user", "content": f"为'{direction_name}'方向的大学生推荐学习资源"},
-    ], temperature=0.3, max_tokens=2048)
+    try:
+        text = client.chat_with_search([
+            {"role": "system", "content": (
+                "为方向推荐5条学习资源，返回JSON：\n"
+                '{"resources":[{"name":"名称","type":"课程|书籍|项目|社区","url":"真实链接","description":"30字理由","score":数字}]}\n'
+                "url必须是搜索结果真实链接，无则留空。"
+            )},
+            {"role": "user", "content": f"为'{direction_name}'方向推荐学习资源"},
+        ], temperature=0.3, max_tokens=800)
+    except Exception:
+        return []
 
     try:
         match = re.search(r"\{[\s\S]*\}", text)
         result = json.loads(match.group(0)) if match else {"resources": []}
-        return result.get("resources", [])
+        resources = result.get("resources", [])
+        # 兼容：如果 LLM 返回了 title 而非 name，做一次映射
+        for r in resources:
+            if "name" not in r and "title" in r:
+                r["name"] = r.pop("title")
+        return resources
     except Exception:
         return []

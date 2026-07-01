@@ -14,7 +14,7 @@ from app.routers.auth import _get_current_user
 from app.schemas.ability import AbilityPortraitResponse, ChatRequest, ChatResponse, DescribeRequest, ResumeSummary
 from app.schemas.user import UserResponse
 from app.services.ability_service import process_description, process_resume_file
-from app.services.model_interface import chat_response
+from app.services.real_models.unified_analyzer import chat_response_local
 
 router = APIRouter()
 
@@ -47,17 +47,18 @@ def describe_self(
     return process_description(session, current_user.id, body.text)
 
 
-@router.get("/portrait", response_model=AbilityPortraitResponse)
+@router.get("/portrait")
 def get_portrait(
     current_user: UserResponse = Depends(_get_current_user),
     session: Session = Depends(get_session),
 ):
-    """获取已保存的能力画像"""
+    """获取已保存的能力画像（无数据时返回 200 null，不报 404）"""
     portrait = session.exec(
         select(AbilityPortrait).where(AbilityPortrait.user_id == current_user.id)
     ).first()
     if portrait is None:
-        raise HTTPException(status_code=404, detail="尚未完成能力评估")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=None, status_code=200)
 
     certs = []
     comps = []
@@ -100,14 +101,7 @@ def chat(
 
     当 stage="file_uploaded" 时，直接返回 portrait_ready=True
     """
-    result = chat_response(body.stage, body.message)
-
-    # 如果画像就绪，用收集到的对话内容触发画像生成
-    if result["portrait_ready"]:
-        try:
-            process_description(session, current_user.id, body.message)
-        except Exception:
-            pass  # 假数据阶段不阻塞
+    result = chat_response_local(body.stage, body.message)
 
     return ChatResponse(
         reply=result["reply"],

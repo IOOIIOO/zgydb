@@ -18,15 +18,28 @@ from app.database import create_db_and_tables
 logger = logging.getLogger(__name__)
 
 
+def _preload_embedding_model():
+    """后台预加载 Embedding 模型，避免首次推荐时阻塞 ~10-15s"""
+    try:
+        from app.services.real_models.embedding import _get_model
+        _get_model()
+        logger.info("Embedding 模型预加载完成")
+    except Exception as e:
+        logger.warning(f"Embedding 模型预加载失败（首次推荐时再加载）: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理：启动时尝试自动建表（数据库不可用时仅警告，不阻塞启动）"""
+    """应用生命周期管理：启动时尝试自动建表 + 后台预加载模型"""
     if settings.DEBUG:
         try:
             create_db_and_tables()
             logger.info("数据库表创建/检查完成")
         except Exception as e:
             logger.warning(f"数据库不可用，跳过自动建表: {e}")
+    # 后台预加载 Embedding 模型（不阻塞启动）
+    import threading
+    threading.Thread(target=_preload_embedding_model, daemon=True).start()
     yield
 
 

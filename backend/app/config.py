@@ -46,11 +46,11 @@ class Settings:
         "CORS_ORIGINS", "http://localhost:5173"
     ).split(",")
 
-    # ---- 模型接口 (占位，后续替换真实模型时使用) ----
-    MODEL_MODE: str = os.getenv("MODEL_MODE", "fake")  # "fake" | "real"
+    # ---- 模型接口 ----
+    # 第13轮检修：MODEL_MODE 已移除，统一走真实模型
     DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")  # 阿里云百炼 API Key
     BAILIAN_WORKSPACE_ID: str = os.getenv("BAILIAN_WORKSPACE_ID", "")  # 百炼业务空间 ID
-    BAILIAN_MODEL: str = os.getenv("BAILIAN_MODEL", "qwen3.7-plus")  # 默认模型
+    BAILIAN_MODEL: str = os.getenv("BAILIAN_MODEL", "qwen3.6-plus")  # 默认模型
 
     @property
     def BAILIAN_BASE_URL(self) -> str:

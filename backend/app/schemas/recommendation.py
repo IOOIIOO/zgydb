@@ -1,4 +1,5 @@
 """岗位推荐请求/响应模型"""
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -51,7 +52,7 @@ class MatchAnalysis(BaseModel):
     knowledge_match: DimensionMatch
     tool_match: DimensionMatch
     project_match: DimensionMatch
-    overall_match_score: float
+    overall_match_score: Optional[float] = None
     recommendation_reason: str
     skill_gaps: list[SkillGap]
     strength_points: list[StrengthPoint]
@@ -68,3 +69,4 @@ class PositionDetailResponse(BaseModel):
     salary_range: str
     education_requirement: str
     match_analysis: MatchAnalysis
+    embedding_match_score: Optional[float] = None

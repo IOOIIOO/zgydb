@@ -1,10 +1,11 @@
 """报告生成路由"""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from sqlmodel import Session
+from sqlmodel import Session, select
 import os
 from app.database import get_session
 from app.routers.auth import _get_current_user
+from app.models.progress import UserProgress
 from app.schemas.user import UserResponse
 from app.services.report_service import generate, get_history, get_detail
 from app.config import settings
@@ -13,6 +14,9 @@ router = APIRouter()
 
 @router.post("/generate")
 def gen(current_user: UserResponse = Depends(_get_current_user), session: Session = Depends(get_session)):
+    progress = session.exec(select(UserProgress).where(UserProgress.user_id == current_user.id)).first()
+    if not progress or not progress.step4_completed:
+        raise HTTPException(status_code=400, detail="请先完成趋势与发展（第四步）")
     return generate(session, current_user.id)
 
 @router.get("/list")

@@ -24,7 +24,7 @@ def _get_model() -> SentenceTransformer:
 
 def vectorize_and_match(user_profile: dict, positions: list[dict]) -> list[dict]:
     """
-    将用户画像与岗位列表进行向量化匹配并排序。
+    将用户画像与岗位列表进行向量化匹配并排序（GPU加速）。
 
     Args:
         user_profile: 含 education/skills/strengths/weaknesses 等字段
@@ -35,17 +35,20 @@ def vectorize_and_match(user_profile: dict, positions: list[dict]) -> list[dict]
     """
     model = _get_model()
 
-    # 构建用户画像文本
+    # 构建用户画像文本（只 encode 一次）
     user_text = _build_user_text(user_profile)
 
+    # 批量编码：用户 + 所有岗位一次性 encode（GPU加速）
+    pos_texts = [_build_position_text(pos) for pos in positions]
+    all_texts = [user_text] + pos_texts
+    all_embs = model.encode(all_texts, batch_size=32, normalize_embeddings=True)
+    user_emb = all_embs[0]
+    pos_embs = all_embs[1:]
+
     results = []
-    for pos in positions:
-        pos_text = _build_position_text(pos)
-        # bge 模型建议为查询增加前缀
-        user_emb = model.encode(user_text, normalize_embeddings=True)
-        pos_emb = model.encode(pos_text, normalize_embeddings=True)
+    for i, pos in enumerate(positions):
         # 余弦相似度 → 映射到 0-100
-        similarity = float(np.dot(user_emb, pos_emb))
+        similarity = float(np.dot(user_emb, pos_embs[i]))
         score = round(max(0.0, min(100.0, similarity * 100)), 1)
         results.append({
             "position_id": pos.get("id", 0),
@@ -71,7 +74,7 @@ def _build_user_text(profile: dict) -> str:
     weaknesses = profile.get("weaknesses", [])
     if weaknesses:
         parts.append(f"短板: {', '.join(weaknesses)}")
-    return "；".join(parts) if parts else "本科生，掌握基础编程技能"
+    return "；".join(parts) if parts else ""
 
 
 def _build_position_text(pos: dict) -> str:

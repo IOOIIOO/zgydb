@@ -1,4 +1,4 @@
-"""趋势分析服务：调用 M3 假数据 + 写DB"""
+"""趋势分析服务：调用联网搜索 + 写DB"""
 
 from sqlmodel import Session, select
 from app.models.trend import TrendAnalysis
@@ -12,6 +12,11 @@ def analyze_trend(session: Session, user_id: int, direction_id: int, position_id
 
     trend_data = search_trends(name)
 
+    # risk_warnings 和 info_sources 直接从 LLM 输出中取
+    risk_warnings = trend_data.get("risk_warnings", [])
+
+    info_sources = trend_data.get("resources", [])
+
     # 清旧数据写入新数据
     old = session.exec(select(TrendAnalysis).where(TrendAnalysis.user_id == user_id)).all()
     for o in old:
@@ -22,8 +27,8 @@ def analyze_trend(session: Session, user_id: int, direction_id: int, position_id
         direction_id=direction_id,
         position_id=position_id,
         trend_data=trend_data,
-        risk_warnings=["技术迭代快，需持续学习", "行业竞争加剧，建议差异化发展"],
-        info_sources=[{"title": "行业研究报告", "url": "https://example.com/report"}],
+        risk_warnings=risk_warnings,
+        info_sources=info_sources,
     )
     session.add(record)
     session.commit()

@@ -66,15 +66,16 @@ def submit(
     )
 
 
-@router.get("/result", response_model=PersonalityResultResponse)
+@router.get("/result")
 def get_result(
     current_user: UserResponse = Depends(_get_current_user),
     session: Session = Depends(get_session),
 ):
-    """获取当前用户已保存的性格测评结果"""
+    """获取当前用户已保存的性格测评结果（无数据时返回 200 null，不报 404）"""
     record = get_existing_result(session, current_user.id)
     if record is None:
-        raise HTTPException(status_code=404, detail="尚未完成性格测评")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=None, status_code=200)
     return PersonalityResultResponse(
         id=record.id,
         personality_type=record.personality_type,
